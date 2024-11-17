@@ -1,0 +1,31 @@
+[package]
+name = "blinky-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+embassy-executor = { version = "0.6.3", features = [
+  "task-arena-size-98304",
+  "arch-cortex-m",
+  "executor-thread",
+  "executor-interrupt",
+  "integrated-timers",
+] }
+embassy-rp = { version = "0.2.0", features = [
+  "unstable-pac",
+  "time-driver",
+  "critical-section-impl",
+] }
+embassy-time = "0.3.2"
+panic-probe = "0.3.2"
+static_cell = "2.1.0"
+cyw43 = { version = "0.2.0", features = ["firmware-logs"] }
+cyw43-pio = "0.2.0"
+critical-section = "1.2.0"
+portable-atomic = { version = "1.9.0", features = ["critical-section"] }
+cortex-m-rt = "0.7.5"
+cortex-m = { version = "0.7.7", features = ["inline-asm"] }
+log = "0.4.22"
+embassy-usb = "0.2.0"
+embassy-futures = "0.1.1"
+embassy-sync = "0.6.0"
