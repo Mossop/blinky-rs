@@ -2,14 +2,25 @@ use core::{fmt::Write as _, str};
 
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
-use embassy_rp::{peripherals::USB, rom_data::reset_to_usb_boot, usb::Driver as RpDriver};
+use embassy_rp::{
+    bind_interrupts,
+    peripherals::USB,
+    rom_data::reset_to_usb_boot,
+    usb::{Driver as RpDriver, InterruptHandler},
+};
 use embassy_sync::pipe::Pipe;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver, Sender, State};
 use embassy_usb::driver::Driver;
 use embassy_usb::{Builder, Config};
 use log::{set_logger_racy, set_max_level_racy, LevelFilter, Metadata, Record};
 
+use crate::UsbPeripherals;
+
 type CS = embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+
+bind_interrupts!(struct Irqs {
+    USBCTRL_IRQ => InterruptHandler<USB>;
+});
 
 /// The logger state containing buffers that must live as long as the USB peripheral.
 struct LoggerState<'d> {
@@ -184,6 +195,7 @@ async fn usb_task(driver: RpDriver<'static, USB>, level: LevelFilter) {
     }
 }
 
-pub fn spawn_usb(spawner: &Spawner, driver: RpDriver<'static, USB>, level: LevelFilter) {
+pub fn spawn_usb(spawner: &Spawner, peripherals: UsbPeripherals, level: LevelFilter) {
+    let driver = RpDriver::new(peripherals.usb, Irqs);
     spawner.spawn(usb_task(driver, level)).unwrap();
 }

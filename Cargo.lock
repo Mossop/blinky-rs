@@ -39,6 +39,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "assign-resources"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c0fc5119624f5c171d084b6a1bd3b6447dfadab980bb0d84717906239b77f85"
+
+[[package]]
 name = "atomic-polyfill"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -105,6 +111,7 @@ checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 name = "blinky-rs"
 version = "0.1.0"
 dependencies = [
+ "assign-resources",
  "cortex-m",
  "cortex-m-rt",
  "critical-section",
