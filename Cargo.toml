@@ -21,10 +21,17 @@ embassy-rp = { version = "0.2.0", features = [
   "rom-v2-intrinsics",
 ] }
 embassy-time = "0.3.2"
+embassy-net = { version = "0.4.0", features = [
+  "dhcpv4",
+  "tcp",
+  "dns",
+  "proto-ipv4",
+] }
 embassy-usb = "0.3.0"
 embassy-usb-logger = "0.2.0"
 embassy-futures = "0.1.0"
 embassy-sync = "0.6.0"
+embedded-io-async = "0.6.1"
 cyw43 = { version = "0.2.0", features = ["firmware-logs"] }
 cyw43-pio = { version = "0.2.0" }
 panic-probe = "0.3.2"
@@ -38,12 +45,16 @@ assign-resources = "0.4.1"
 smart-leds = "0.4.0"
 pio = "0.2.1"
 fixed = "1.28.0"
+rand = { version = "0.8.5", default-features = false }
+mqttrust = "0.6.0"
+hex = { version = "0.4.3", default-features = false }
 
 [patch.crates-io]
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
 embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
 embassy-time = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
 embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+embassy-net = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
 embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
 embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
 embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }

@@ -1,4 +1,9 @@
 {
   "rust-analyzer.cargo.target": "thumbv6m-none-eabi",
-  "rust-analyzer.cargo.allTargets": false
+  "rust-analyzer.cargo.allTargets": false,
+  "rust-analyzer.server.extraEnv": {
+    "BLINKY_SSID": "",
+    "BLINKY_PASSWORD": "",
+    "BLINKY_BROKER": "",
+  }
 }

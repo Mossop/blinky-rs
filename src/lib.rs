@@ -5,14 +5,21 @@ use embassy_executor::Spawner;
 use embassy_rp::peripherals;
 
 mod leds;
-mod network;
+mod mqtt;
 mod usb;
 mod ws2812;
 
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
 use log::{info, LevelFilter};
-use smart_leds::RGB8;
 
-use crate::{leds::Leds, network::spawn_network, usb::spawn_usb};
+use crate::{mqtt::spawn_mqtt, usb::spawn_usb};
+
+enum Command {
+    MqttConnected,
+}
+
+static COMMAND_CHANNEL: channel::Channel<CriticalSectionRawMutex, Command, 10> =
+    channel::Channel::new();
 
 assign_resources! {
     usb: UsbPeripherals {
@@ -39,29 +46,17 @@ pub async fn main(spawner: Spawner) {
     let resources = split_resources!(peripherals);
 
     spawn_usb(&spawner, resources.usb, LevelFilter::Trace);
-    spawn_network(&spawner, resources.network).await;
+    spawn_mqtt(&spawner, resources.network).await;
 
-    let mut leds = Leds::<50, leds::RGB>::new(resources.leds);
+    let receiver = COMMAND_CHANNEL.receiver();
 
     loop {
-        info!("Going up");
-        for p in 0..=255 {
-            let pixel = RGB8::new(p, 0, 0);
-            for i in 0..leds.len() {
-                leds.set(i, &pixel);
+        let command = receiver.receive().await;
+
+        match command {
+            Command::MqttConnected => {
+                info!("Mqtt connected");
             }
-
-            leds.write().await;
-        }
-
-        info!("Going down");
-        for p in (0..=255).rev() {
-            let pixel = RGB8::new(p, 0, 0);
-            for i in 0..leds.len() {
-                leds.set(i, &pixel);
-            }
-
-            leds.write().await;
         }
     }
 }
