@@ -16,6 +16,9 @@ embassy-rp = { version = "0.2.0", features = [
   "time-driver",
   "critical-section-impl",
   "rp2040",
+  "rom-func-cache",
+  "intrinsics",
+  "rom-v2-intrinsics",
 ] }
 embassy-time = "0.3.2"
 embassy-usb = "0.3.0"
@@ -32,6 +35,9 @@ cortex-m-rt = "0.7.5"
 cortex-m = { version = "0.7.7", features = ["inline-asm"] }
 log = "0.4.22"
 assign-resources = "0.4.1"
+smart-leds = "0.4.0"
+pio = "0.2.1"
+fixed = "1.28.0"
 
 [patch.crates-io]
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }

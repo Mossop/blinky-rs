@@ -4,13 +4,15 @@ use assign_resources::assign_resources;
 use embassy_executor::Spawner;
 use embassy_rp::peripherals;
 
+mod leds;
 mod network;
 mod usb;
+mod ws2812;
 
-use embassy_time::{Duration, Timer};
 use log::{info, LevelFilter};
+use smart_leds::RGB8;
 
-use crate::{network::spawn_network, usb::spawn_usb};
+use crate::{leds::Leds, network::spawn_network, usb::spawn_usb};
 
 assign_resources! {
     usb: UsbPeripherals {
@@ -27,7 +29,7 @@ assign_resources! {
     leds: LedPeripherals {
         pio: PIO1,
         dma: DMA_CH1,
-        pin: PIN_20,
+        pin: PIN_15,
     }
 }
 
@@ -37,16 +39,29 @@ pub async fn main(spawner: Spawner) {
     let resources = split_resources!(peripherals);
 
     spawn_usb(&spawner, resources.usb, LevelFilter::Trace);
-    let mut control = spawn_network(&spawner, resources.network).await;
+    spawn_network(&spawner, resources.network).await;
 
-    let delay = Duration::from_secs(1);
+    let mut leds = Leds::<50, leds::RGB>::new(resources.leds);
+
     loop {
-        info!("led on!");
-        control.gpio_set(0, true).await;
-        Timer::after(delay).await;
+        info!("Going up");
+        for p in 0..=255 {
+            let pixel = RGB8::new(p, 0, 0);
+            for i in 0..leds.len() {
+                leds.set(i, &pixel);
+            }
 
-        info!("led off!");
-        control.gpio_set(0, false).await;
-        Timer::after(delay).await;
+            leds.write().await;
+        }
+
+        info!("Going down");
+        for p in (0..=255).rev() {
+            let pixel = RGB8::new(p, 0, 0);
+            for i in 0..leds.len() {
+                leds.set(i, &pixel);
+            }
+
+            leds.write().await;
+        }
     }
 }
