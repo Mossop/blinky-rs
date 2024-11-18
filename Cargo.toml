@@ -15,18 +15,32 @@ embassy-rp = { version = "0.2.0", features = [
   "unstable-pac",
   "time-driver",
   "critical-section-impl",
+  "rp2040",
 ] }
 embassy-time = "0.3.2"
+embassy-usb = "0.3.0"
+embassy-usb-logger = "0.2.0"
+embassy-futures = "0.1.0"
+embassy-sync = "0.6.0"
+cyw43 = { version = "0.2.0", features = ["firmware-logs"] }
+cyw43-pio = { version = "0.2.0" }
 panic-probe = "0.3.2"
 static_cell = "2.1.0"
-cyw43 = { version = "0.2.0", features = ["firmware-logs"] }
-cyw43-pio = "0.2.0"
 critical-section = "1.2.0"
 portable-atomic = { version = "1.9.0", features = ["critical-section"] }
 cortex-m-rt = "0.7.5"
 cortex-m = { version = "0.7.7", features = ["inline-asm"] }
 log = "0.4.22"
-embassy-usb = "0.2.0"
-embassy-futures = "0.1.1"
-embassy-sync = "0.6.0"
 assign-resources = "0.4.1"
+
+[patch.crates-io]
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+cyw43 = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+cyw43-pio = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
