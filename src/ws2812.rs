@@ -3,13 +3,22 @@
 use embassy_time::Timer;
 use fixed::types::U24F8;
 
-use embassy_rp::clocks::clk_sys_freq;
-use embassy_rp::dma::{AnyChannel, Channel};
-use embassy_rp::pio::{
-    Common, Config, FifoJoin, Instance, LoadedProgram, PioPin, ShiftConfig, ShiftDirection,
-    StateMachine,
+use embassy_rp::{bind_interrupts, clocks::clk_sys_freq, pio::Pio};
+use embassy_rp::{dma::AnyChannel, pio::InterruptHandler};
+use embassy_rp::{
+    peripherals::PIO1,
+    pio::{
+        Common, Config, FifoJoin, Instance, LoadedProgram, ShiftConfig, ShiftDirection,
+        StateMachine,
+    },
 };
-use embassy_rp::{into_ref, Peripheral, PeripheralRef};
+use embassy_rp::{Peripheral, PeripheralRef};
+
+use crate::LedPeripherals;
+
+bind_interrupts!(struct Irqs {
+    PIO1_IRQ_0 => InterruptHandler<PIO1>;
+});
 
 const T1: u8 = 2; // start bit
 const T2: u8 = 5; // data bit
@@ -52,30 +61,31 @@ impl<'a, PIO: Instance> PioWs2812Program<'a, PIO> {
 
 /// Pio backed ws2812 driver
 /// Const N is the number of ws2812 leds attached to this pin
-pub struct PioWs2812<'d, P: Instance, const S: usize, const N: usize> {
-    dma: PeripheralRef<'d, AnyChannel>,
-    sm: StateMachine<'d, P, S>,
+pub struct PioWs2812 {
+    dma: PeripheralRef<'static, AnyChannel>,
+    sm: StateMachine<'static, PIO1, 0>,
 }
 
-impl<'d, P: Instance, const S: usize, const N: usize> PioWs2812<'d, P, S, N> {
+impl PioWs2812 {
     /// Configure a pio state machine to use the loaded ws2812 program.
-    pub fn new(
-        pio: &mut Common<'d, P>,
-        mut sm: StateMachine<'d, P, S>,
-        dma: impl Peripheral<P = impl Channel> + 'd,
-        pin: impl PioPin,
-    ) -> Self {
-        into_ref!(dma);
+    pub fn new(peripherals: LedPeripherals) -> Self {
+        let Pio {
+            mut common,
+            mut sm0,
+            ..
+        } = Pio::new(peripherals.pio, Irqs);
+
+        let dma = peripherals.dma.into_ref();
 
         // Setup sm0
         let mut cfg = Config::default();
 
         // Pin config
-        let out_pin = pio.make_pio_pin(pin);
+        let out_pin = common.make_pio_pin(peripherals.pin);
         cfg.set_out_pins(&[&out_pin]);
         cfg.set_set_pins(&[&out_pin]);
 
-        let program = PioWs2812Program::new(pio);
+        let program = PioWs2812Program::new(&mut common);
         cfg.use_program(&program.prg, &[&out_pin]);
 
         // Clock config, measured in kHz to avoid overflows
@@ -92,17 +102,17 @@ impl<'d, P: Instance, const S: usize, const N: usize> PioWs2812<'d, P, S, N> {
             direction: ShiftDirection::Left,
         };
 
-        sm.set_config(&cfg);
-        sm.set_enable(true);
+        sm0.set_config(&cfg);
+        sm0.set_enable(true);
 
         Self {
             dma: dma.map_into(),
-            sm,
+            sm: sm0,
         }
     }
 
     /// Write a buffer of [smart_leds::RGB8] to the ws2812 string
-    pub async fn write(&mut self, data: [u32; N]) {
+    pub async fn write<const N: usize>(&mut self, data: [u32; N]) {
         // DMA transfer
         self.sm.tx().dma_push(self.dma.reborrow(), &data).await;
 

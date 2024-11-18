@@ -1,18 +1,9 @@
 use core::marker::PhantomData;
 
-use embassy_rp::{
-    bind_interrupts,
-    peripherals::PIO1,
-    pio::{InterruptHandler, Pio},
-};
 use smart_leds::RGB8;
 
 use crate::ws2812::PioWs2812;
 use crate::LedPeripherals;
-
-bind_interrupts!(struct Irqs {
-    PIO1_IRQ_0 => InterruptHandler<PIO1>;
-});
 
 const GAMMA8: [u8; 256] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
@@ -63,17 +54,13 @@ impl Order for RGB {
 pub struct Leds<const N: usize, O: Order> {
     pixels: [RGB8; N],
     data: [u32; N],
-    ws2812: PioWs2812<'static, PIO1, 0, N>,
+    ws2812: PioWs2812,
     _order: PhantomData<O>,
 }
 
 impl<const N: usize, O: Order> Leds<N, O> {
     pub fn new(peripherals: LedPeripherals) -> Self {
-        let Pio {
-            mut common, sm0, ..
-        } = Pio::new(peripherals.pio, Irqs);
-
-        let ws2812 = PioWs2812::new(&mut common, sm0, peripherals.dma, peripherals.pin);
+        let ws2812 = PioWs2812::new(peripherals);
 
         Leds {
             pixels: [RGB8::default(); N],
