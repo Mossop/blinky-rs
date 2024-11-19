@@ -3,7 +3,7 @@ use core::str;
 use cyw43::{Control, JoinOptions};
 use cyw43_pio::PioSpi;
 use embassy_executor::Spawner;
-use embassy_futures::select::select;
+use embassy_futures::select::select3;
 use embassy_net::{
     dns::DnsQueryType,
     tcp::{TcpReader, TcpSocket},
@@ -19,7 +19,7 @@ use embassy_rp::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
 use embassy_time::Timer;
 use embedded_io_async::Write;
-use log::{error, trace};
+use log::{error, trace, warn};
 use mqttrust::{
     encoding::v4::{decode_slice, encode_slice, Connect, ConnectReturnCode, Protocol},
     Packet,
@@ -33,7 +33,11 @@ const WIFI_SSID: &str = env!("BLINKY_SSID");
 const WIFI_PASSWORD: &str = env!("BLINKY_PASSWORD");
 const BROKER: &str = env!("BLINKY_BROKER");
 
-pub(crate) enum MqttMessage {}
+const DEVICE: &str = "Blinky";
+
+pub(crate) enum MqttMessage {
+    Ping,
+}
 
 pub(crate) static MQTT_CHANNEL: channel::Channel<CriticalSectionRawMutex, MqttMessage, 10> =
     channel::Channel::new();
@@ -44,7 +48,9 @@ bind_interrupts!(struct Irqs {
 
 impl MqttMessage {
     fn packet(&self) -> Packet<'_> {
-        todo!();
+        match self {
+            Self::Ping => Packet::Pingreq,
+        }
     }
 }
 
@@ -232,6 +238,13 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
             }
         };
 
+        let ping_loop = async {
+            loop {
+                Timer::after_secs(45).await;
+                MQTT_CHANNEL.send(MqttMessage::Ping).await;
+            }
+        };
+
         let recv_loop = async {
             loop {
                 let packet = match read_packet(&mut reader, &mut read_buf).await {
@@ -241,10 +254,17 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
                         break;
                     }
                 };
+
+                match packet {
+                    Packet::Pingresp => {}
+                    p => {
+                        warn!("MQTT: Unexpected packet: {:?}", p.get_type());
+                    }
+                }
             }
         };
 
-        select(send_loop, recv_loop).await;
+        select3(send_loop, ping_loop, recv_loop).await;
     }
 }
 
