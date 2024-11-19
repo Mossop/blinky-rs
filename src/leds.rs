@@ -2,8 +2,8 @@ use core::marker::PhantomData;
 
 use smart_leds::RGB8;
 
-use crate::ws2812::PioWs2812;
 use crate::LedPeripherals;
+use crate::{ws2812::PioWs2812, LedState};
 
 const GAMMA8: [u8; 256] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
@@ -86,5 +86,20 @@ impl<const N: usize, O: Order> Leds<N, O> {
 
     pub async fn write(&mut self) {
         self.ws2812.write(self.data).await;
+    }
+
+    pub async fn set_state(&mut self, state: LedState) {
+        let pixel = match state {
+            LedState::Off => RGB8::new(0, 0, 0),
+            LedState::On { red, green, blue } => RGB8::new(red, green, blue),
+        };
+
+        let word = O::to_word(&gamma_corrected(&pixel));
+        for index in 0..N {
+            self.pixels[index] = pixel;
+            self.data[index] = word;
+        }
+
+        self.write().await;
     }
 }

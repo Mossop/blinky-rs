@@ -2,7 +2,8 @@ use core::str;
 
 use crate::{
     log::{error, trace, warn},
-    mqtt::packets::{packet_size, state},
+    mqtt::packets::{packet_size, state, subscribe, LedPayload},
+    LedState,
 };
 use cyw43::{Control, JoinOptions};
 use cyw43_pio::PioSpi;
@@ -41,20 +42,42 @@ const WIFI_SSID: &str = env!("BLINKY_SSID");
 const WIFI_PASSWORD: &str = env!("BLINKY_PASSWORD");
 const BROKER: &str = env!("BLINKY_BROKER");
 
-pub enum Device {
-    Power,
+pub enum Topic {
+    HaState,
+    LedCommand,
 }
 
-pub enum State {
-    On,
-    Off,
+impl Topic {
+    fn from_topic(client_id: &str, topic: &str) -> Option<Topic> {
+        if topic == "homeassistant/status" {
+            return Some(Topic::HaState);
+        }
+
+        if topic.starts_with("blinky/")
+            && &topic[7..client_id.len() + 7] == client_id
+            && &topic[client_id.len() + 7..client_id.len() + 8] == "/"
+        {
+            match &topic[client_id.len() + 8..] {
+                "leds/set" => Some(Topic::LedCommand),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+
+pub enum DeviceState {
+    Online,
+    Led(LedState),
 }
 
 pub(crate) enum MqttMessage {
     Connect,
     Ping,
     SendDiscovery,
-    SendState(Device, State),
+    SendState(DeviceState),
+    Subscribe(Topic),
 }
 
 pub(crate) static MQTT_CHANNEL: channel::Channel<CriticalSectionRawMutex, MqttMessage, 10> =
@@ -65,12 +88,18 @@ bind_interrupts!(struct Irqs {
 });
 
 impl MqttMessage {
-    fn build_packet<'a>(&self, client_id: &str, buffer: &'a mut [u8]) -> Result<&'a [u8], Error> {
+    fn build_packet<'a>(
+        &self,
+        client_id: &str,
+        mac_addr: &str,
+        buffer: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
         match self {
             Self::Connect => connect(client_id, buffer),
             Self::Ping => ping(buffer),
-            Self::SendDiscovery => discovery(client_id, buffer),
-            Self::SendState(device, device_state) => state(client_id, device, device_state, buffer),
+            Self::SendDiscovery => discovery(client_id, mac_addr, buffer),
+            Self::SendState(device_state) => state(client_id, device_state, buffer),
+            Self::Subscribe(topic) => subscribe(client_id, topic, buffer),
         }
     }
 }
@@ -89,11 +118,16 @@ async fn embassy_net_task(
     runner.run().await
 }
 
-async fn send_loop(client_id: &str, mut writer: TcpWriter<'_>, write_buf: &mut [u8]) {
+async fn send_loop(
+    client_id: &str,
+    mac_addr: &str,
+    mut writer: TcpWriter<'_>,
+    write_buf: &mut [u8],
+) {
     loop {
         let message = MQTT_CHANNEL.receive().await;
 
-        match message.build_packet(client_id, write_buf) {
+        match message.build_packet(client_id, mac_addr, write_buf) {
             Ok(packet) => {
                 if writer.write_all(packet).await.is_err() {
                     error!("Failed to send packet");
@@ -108,7 +142,7 @@ async fn send_loop(client_id: &str, mut writer: TcpWriter<'_>, write_buf: &mut [
     }
 }
 
-async fn recv_loop(mut reader: TcpReader<'_>, buffer: &mut [u8]) {
+async fn recv_loop(client_id: &str, mut reader: TcpReader<'_>, buffer: &mut [u8]) {
     let mut cursor: usize = 0;
 
     loop {
@@ -150,6 +184,8 @@ async fn recv_loop(mut reader: TcpReader<'_>, buffer: &mut [u8]) {
             }
         };
 
+        trace!("Received {:?} packet", packet.get_type());
+
         match packet {
             Packet::Connack(ack) => {
                 if ack.code != ConnectReturnCode::Accepted {
@@ -158,6 +194,13 @@ async fn recv_loop(mut reader: TcpReader<'_>, buffer: &mut [u8]) {
                 }
 
                 MQTT_CHANNEL.send(MqttMessage::SendDiscovery).await;
+                MQTT_CHANNEL
+                    .send(MqttMessage::Subscribe(Topic::HaState))
+                    .await;
+                MQTT_CHANNEL
+                    .send(MqttMessage::Subscribe(Topic::LedCommand))
+                    .await;
+
                 COMMAND_CHANNEL.send(Command::MqttConnected).await;
             }
             Packet::Pingresp => {}
@@ -166,6 +209,33 @@ async fn recv_loop(mut reader: TcpReader<'_>, buffer: &mut [u8]) {
             // Used for QoS 2, ignored for now.
             Packet::Pubrec(_) => {}
             Packet::Pubcomp(_) => {}
+            // We just assume it all worked.
+            Packet::Suback(_) => {}
+            Packet::Publish(publish) => {
+                if let Some(topic) = Topic::from_topic(client_id, publish.topic_name) {
+                    match topic {
+                        Topic::HaState => {
+                            MQTT_CHANNEL.send(MqttMessage::SendDiscovery).await;
+                            COMMAND_CHANNEL.send(Command::MqttConnected).await;
+                        }
+                        Topic::LedCommand => {
+                            match serde_json_core::from_slice::<LedPayload>(publish.payload) {
+                                Ok((payload, _)) => {
+                                    COMMAND_CHANNEL
+                                        .send(Command::SetLedState(payload.to_state()))
+                                        .await;
+                                }
+                                Err(_) => {
+                                    trace!(
+                                        "Failed to decode led state payload: {}",
+                                        str::from_utf8(publish.payload).unwrap()
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             p => {
                 warn!("Unexpected packet: {:?}", p.get_type());
             }
@@ -182,7 +252,7 @@ async fn recv_loop(mut reader: TcpReader<'_>, buffer: &mut [u8]) {
 }
 
 #[embassy_executor::task]
-async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
+async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>, client_id: &'static str) {
     control.gpio_set(0, false).await;
 
     loop {
@@ -205,7 +275,7 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
 
     let mut hex_slice = [0; 12];
     hex::encode_to_slice(control.address().await, &mut hex_slice).unwrap();
-    let client_id = str::from_utf8(&hex_slice).unwrap();
+    let mac_addr = str::from_utf8(&hex_slice).unwrap();
 
     trace!("Connected to network");
 
@@ -254,13 +324,14 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
         MQTT_CHANNEL.clear();
         MQTT_CHANNEL.send(MqttMessage::Connect).await;
 
-        let recv_loop = recv_loop(reader, &mut read_buf);
-        let send_loop = send_loop(client_id, writer, &mut write_buf);
+        let recv_loop = recv_loop(client_id, reader, &mut read_buf);
+        let send_loop = send_loop(client_id, mac_addr, writer, &mut write_buf);
 
         let ping_loop = async {
             loop {
                 Timer::after_secs(45).await;
                 MQTT_CHANNEL.send(MqttMessage::Ping).await;
+                COMMAND_CHANNEL.send(Command::MqttConnected).await;
             }
         };
 
@@ -270,7 +341,7 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
     }
 }
 
-pub async fn spawn_mqtt(spawner: &Spawner, peripherals: NetPeripherals) {
+pub async fn spawn_mqtt(spawner: &Spawner, client_id: &'static str, peripherals: NetPeripherals) {
     let fw = include_bytes!("../../cyw43/43439A0.bin");
     let clm = include_bytes!("../../cyw43/43439A0_clm.bin");
 
@@ -312,5 +383,5 @@ pub async fn spawn_mqtt(spawner: &Spawner, peripherals: NetPeripherals) {
 
     spawner.spawn(embassy_net_task(runner)).unwrap();
 
-    spawner.spawn(mqtt_task(control, stack)).unwrap();
+    spawner.spawn(mqtt_task(control, stack, client_id)).unwrap();
 }

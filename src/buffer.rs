@@ -1,5 +1,7 @@
 use core::{fmt, ops::Deref, str};
 
+use serde::Serialize;
+
 pub struct ByteBuffer<const N: usize> {
     buf: [u8; N],
     cursor: usize,
@@ -15,6 +17,15 @@ impl<const N: usize> ByteBuffer<N> {
 
     pub fn buffer(&self) -> &[u8] {
         &self.buf[0..self.cursor]
+    }
+
+    pub fn serialize<T>(&mut self, value: &T) -> serde_json_core::ser::Result<()>
+    where
+        T: Serialize + ?Sized,
+    {
+        let len = serde_json_core::to_slice(value, &mut self.buf[self.cursor..])?;
+        self.cursor += len;
+        Ok(())
     }
 
     pub fn as_str(&self) -> &str {
