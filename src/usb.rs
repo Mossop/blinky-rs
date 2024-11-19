@@ -1,3 +1,4 @@
+use core::fmt::Write;
 use core::str;
 
 use embassy_executor::Spawner;
@@ -7,8 +8,8 @@ use embassy_rp::{
     rom_data::reset_to_usb_boot,
     usb::{Driver, InterruptHandler},
 };
-use embassy_usb_logger::ReceiverHandler;
-use log::LevelFilter;
+use embassy_usb_logger::{ReceiverHandler, UsbLogger, Writer};
+use log::{LevelFilter, Record};
 
 use crate::UsbPeripherals;
 
@@ -40,12 +41,35 @@ impl ReceiverHandler for Handler {
     }
 }
 
-#[embassy_executor::task]
-async fn usb_task(driver: Driver<'static, USB>, level: LevelFilter) {
-    embassy_usb_logger::run!(1024, level, driver, Handler)
+fn writer(record: &Record, writer: &mut Writer<'_, 1024>) {
+    let mut target = record.target();
+    if target.starts_with("blinky_rs::") {
+        target = &target[11..];
+    }
+
+    let _ = write!(
+        writer,
+        "{:>5} {:<15} - {}\r\n",
+        record.level(),
+        target,
+        record.args()
+    );
 }
 
-pub fn spawn_usb(spawner: &Spawner, peripherals: UsbPeripherals, level: LevelFilter) {
+#[embassy_executor::task]
+async fn usb_task(driver: Driver<'static, USB>, level: LevelFilter) {
+    static mut LOGGER: UsbLogger<1024, Handler> = UsbLogger::with_custom_style(writer);
+    unsafe {
+        LOGGER.with_handler(Handler::new());
+        #[allow(static_mut_refs)]
+        let _ = ::log::set_logger_racy(&LOGGER).map(|()| log::set_max_level_racy(level));
+        let _ = LOGGER
+            .run(&mut ::embassy_usb_logger::LoggerState::new(), driver)
+            .await;
+    }
+}
+
+pub fn spawn_usb(spawner: &Spawner, peripherals: UsbPeripherals) {
     let driver = Driver::new(peripherals.usb, Irqs);
-    spawner.spawn(usb_task(driver, level)).unwrap();
+    spawner.spawn(usb_task(driver, LevelFilter::Trace)).unwrap();
 }

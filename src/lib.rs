@@ -4,15 +4,20 @@ use assign_resources::assign_resources;
 use embassy_executor::Spawner;
 use embassy_rp::peripherals;
 
+mod buffer;
 mod leds;
+mod log;
 mod mqtt;
+#[cfg(feature = "log")]
 mod usb;
 mod ws2812;
 
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
-use log::{info, LevelFilter};
+#[cfg(feature = "defmt")]
+use defmt_rtt as _;
 
-use crate::{mqtt::spawn_mqtt, usb::spawn_usb};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
+
+use crate::mqtt::{spawn_mqtt, Device, MqttMessage, State, MQTT_CHANNEL};
 
 enum Command {
     MqttConnected,
@@ -45,7 +50,9 @@ pub async fn main(spawner: Spawner) {
 
     let resources = split_resources!(peripherals);
 
-    spawn_usb(&spawner, resources.usb, LevelFilter::Trace);
+    #[cfg(feature = "log")]
+    usb::spawn_usb(&spawner, resources.usb);
+
     spawn_mqtt(&spawner, resources.network).await;
 
     let receiver = COMMAND_CHANNEL.receiver();
@@ -55,7 +62,9 @@ pub async fn main(spawner: Spawner) {
 
         match command {
             Command::MqttConnected => {
-                info!("Mqtt connected");
+                MQTT_CHANNEL
+                    .send(MqttMessage::SendState(Device::Power, State::On))
+                    .await;
             }
         }
     }

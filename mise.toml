@@ -1,6 +1,7 @@
 [tools]
 "cargo:elf2uf2-rs" = "latest"
 "cargo:flip-link" = "latest"
+"cargo:probe-rs-tools" = "latest"
 
 [tasks.build]
 sources = ["Cargo.toml", "Cargo.lock", "src/**/*.rs"]
@@ -14,4 +15,8 @@ outputs = ["blinky.uf2"]
 run = "elf2uf2-rs target/thumbv6m-none-eabi/debug/blinky-rs blinky.uf2"
 
 [tasks.run]
-run = "mise run"
+run = "cargo run"
+
+[tasks.debug]
+run = "cargo run --features defmt"
+env = { CARGO_TARGET_THUMBV6M_NONE_EABI_RUNNER = "probe-rs run --chip RP2040 --protocol swd" }

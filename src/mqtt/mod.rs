@@ -1,12 +1,16 @@
 use core::str;
 
+use crate::{
+    log::{error, trace, warn},
+    mqtt::packets::{packet_size, state},
+};
 use cyw43::{Control, JoinOptions};
 use cyw43_pio::PioSpi;
 use embassy_executor::Spawner;
 use embassy_futures::select::select3;
 use embassy_net::{
     dns::DnsQueryType,
-    tcp::{TcpReader, TcpSocket},
+    tcp::{TcpReader, TcpSocket, TcpWriter},
     Config, Stack, StackResources,
 };
 use embassy_rp::{
@@ -19,24 +23,38 @@ use embassy_rp::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
 use embassy_time::Timer;
 use embedded_io_async::Write;
-use log::{error, trace, warn};
 use mqttrust::{
-    encoding::v4::{decode_slice, encode_slice, Connect, ConnectReturnCode, Protocol},
+    encoding::v4::{decode_slice, ConnectReturnCode, Error},
     Packet,
 };
 use rand::RngCore;
 use static_cell::StaticCell;
 
-use crate::{Command, NetPeripherals, COMMAND_CHANNEL};
+mod packets;
+
+use crate::{
+    mqtt::packets::{connect, discovery, ping},
+    Command, NetPeripherals, COMMAND_CHANNEL,
+};
 
 const WIFI_SSID: &str = env!("BLINKY_SSID");
 const WIFI_PASSWORD: &str = env!("BLINKY_PASSWORD");
 const BROKER: &str = env!("BLINKY_BROKER");
 
-const DEVICE: &str = "Blinky";
+pub enum Device {
+    Power,
+}
+
+pub enum State {
+    On,
+    Off,
+}
 
 pub(crate) enum MqttMessage {
+    Connect,
     Ping,
+    SendDiscovery,
+    SendState(Device, State),
 }
 
 pub(crate) static MQTT_CHANNEL: channel::Channel<CriticalSectionRawMutex, MqttMessage, 10> =
@@ -47,9 +65,12 @@ bind_interrupts!(struct Irqs {
 });
 
 impl MqttMessage {
-    fn packet(&self) -> Packet<'_> {
+    fn build_packet<'a>(&self, client_id: &str, buffer: &'a mut [u8]) -> Result<&'a [u8], Error> {
         match self {
-            Self::Ping => Packet::Pingreq,
+            Self::Connect => connect(client_id, buffer),
+            Self::Ping => ping(buffer),
+            Self::SendDiscovery => discovery(client_id, buffer),
+            Self::SendState(device, device_state) => state(client_id, device, device_state, buffer),
         }
     }
 }
@@ -68,38 +89,96 @@ async fn embassy_net_task(
     runner.run().await
 }
 
-enum MqttError {
-    Network,
-    Mqtt,
-}
-
-impl From<embassy_net::tcp::Error> for MqttError {
-    fn from(_: embassy_net::tcp::Error) -> Self {
-        Self::Network
-    }
-}
-
-impl From<mqttrust::encoding::v4::Error> for MqttError {
-    fn from(_: mqttrust::encoding::v4::Error) -> Self {
-        Self::Mqtt
-    }
-}
-
-async fn read_packet<'a, 'b>(
-    reader: &mut TcpReader<'b>,
-    buffer: &'a mut [u8; 4096],
-) -> Result<Packet<'a>, MqttError> {
-    let mut pos: usize = 0;
+async fn send_loop(client_id: &str, mut writer: TcpWriter<'_>, write_buf: &mut [u8]) {
     loop {
-        let len = reader.read(&mut buffer[pos..]).await?;
-        pos += len;
+        let message = MQTT_CHANNEL.receive().await;
 
-        if decode_slice(&buffer[0..pos])?.is_some() {
-            break;
+        match message.build_packet(client_id, write_buf) {
+            Ok(packet) => {
+                if writer.write_all(packet).await.is_err() {
+                    error!("Failed to send packet");
+                    break;
+                }
+            }
+            Err(_) => {
+                error!("Failed to encode packet");
+                break;
+            }
         }
     }
+}
 
-    Ok(decode_slice(&buffer[0..pos])?.unwrap())
+async fn recv_loop(mut reader: TcpReader<'_>, buffer: &mut [u8]) {
+    let mut cursor: usize = 0;
+
+    loop {
+        match reader.read(&mut buffer[cursor..]).await {
+            Ok(0) => {
+                error!("Receive socket closed");
+                break;
+            }
+            Ok(len) => {
+                cursor += len;
+            }
+            Err(_) => {
+                error!("I/O failure reading packet");
+                break;
+            }
+        }
+
+        let packet_length = match packet_size(&buffer[0..cursor]) {
+            Some(0) => {
+                error!("Invalid MQTT packet");
+                break;
+            }
+            Some(len) => len,
+            None => {
+                // None is returned when there is not yet enough data to decode a packet.
+                continue;
+            }
+        };
+
+        let packet = match decode_slice(&buffer[0..packet_length]) {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                error!("Packet length calculation failed.");
+                break;
+            }
+            Err(_) => {
+                error!("Invalid MQTT packet");
+                break;
+            }
+        };
+
+        match packet {
+            Packet::Connack(ack) => {
+                if ack.code != ConnectReturnCode::Accepted {
+                    error!("Unexpected connection return code {:?}", ack.code);
+                    break;
+                }
+
+                MQTT_CHANNEL.send(MqttMessage::SendDiscovery).await;
+                COMMAND_CHANNEL.send(Command::MqttConnected).await;
+            }
+            Packet::Pingresp => {}
+            // Used for QoS 1, ignored for now.
+            Packet::Puback(_) => {}
+            // Used for QoS 2, ignored for now.
+            Packet::Pubrec(_) => {}
+            Packet::Pubcomp(_) => {}
+            p => {
+                warn!("Unexpected packet: {:?}", p.get_type());
+            }
+        }
+
+        // Adjust the buffer to reclaim any unused data
+        if packet_length == cursor {
+            cursor = 0;
+        } else {
+            buffer.copy_within(packet_length..cursor, 0);
+            cursor -= packet_length;
+        }
+    }
 }
 
 #[embassy_executor::task]
@@ -113,7 +192,7 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
         {
             Ok(_) => break,
             Err(err) => {
-                error!("MQTT: Failed to join network: {}", err.status);
+                error!("Failed to join network: {}", err.status);
                 Timer::after_secs(1).await;
             }
         }
@@ -128,7 +207,7 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
     hex::encode_to_slice(control.address().await, &mut hex_slice).unwrap();
     let client_id = str::from_utf8(&hex_slice).unwrap();
 
-    trace!("MQTT: Connected to network");
+    trace!("Connected to network");
 
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
@@ -148,7 +227,7 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
         let ip_addrs = match stack.dns_query(BROKER, DnsQueryType::A).await {
             Ok(v) => v,
             Err(_) => {
-                error!("MQTT: Failed to lookup '{}' for broker", BROKER);
+                error!("Failed to lookup '{}' for broker", BROKER);
                 continue;
             }
         };
@@ -156,87 +235,27 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
         let ip = match ip_addrs.first() {
             Some(i) => *i,
             None => {
-                error!("MQTT: No IP address found for broker '{}'", BROKER);
+                error!("No IP address found for broker '{}'", BROKER);
                 continue;
             }
         };
 
-        trace!("MQTT: Connecting to {ip}:1883");
+        trace!("Connecting to {ip}:1883");
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         if socket.connect((ip, 1883)).await.is_err() {
-            error!("MQTT: Failed to connect to {ip}:1883");
+            error!("Failed to connect to {ip}:1883");
             continue;
         }
 
-        let (mut reader, mut writer) = socket.split();
-
-        let packet = Connect {
-            protocol: Protocol::MQTT311,
-            keep_alive: 60,
-            client_id,
-            clean_session: true,
-            last_will: None,
-            username: None,
-            password: None,
-        }
-        .into();
-
-        let len = match encode_slice(&packet, &mut write_buf) {
-            Ok(l) => l,
-            Err(_) => {
-                error!("MQTT: Failed to encode connect packet");
-                continue;
-            }
-        };
-
-        if writer.write_all(&write_buf[0..len]).await.is_err() {
-            error!("MQTT: Failed to send connect message");
-            continue;
-        }
-
-        let packet = match read_packet(&mut reader, &mut read_buf).await {
-            Ok(p) => p,
-            Err(_) => {
-                error!("MQTT: Failed to receive packet");
-                continue;
-            }
-        };
-
-        match packet {
-            Packet::Connack(ack) => {
-                if ack.code != ConnectReturnCode::Accepted {
-                    error!("Unexpected connection return code {:?}", ack.code);
-                    continue;
-                }
-            }
-            p => {
-                error!("Unexpected packet {:?}", p.get_type());
-                continue;
-            }
-        }
+        let (reader, writer) = socket.split();
 
         control.gpio_set(0, true).await;
-        COMMAND_CHANNEL.send(Command::MqttConnected).await;
+        MQTT_CHANNEL.clear();
+        MQTT_CHANNEL.send(MqttMessage::Connect).await;
 
-        let send_loop = async {
-            loop {
-                let message = MQTT_CHANNEL.receive().await;
-
-                let len = match encode_slice(&message.packet(), &mut write_buf) {
-                    Ok(l) => l,
-                    Err(_) => {
-                        error!("MQTT: Failed to encode connect packet");
-                        break;
-                    }
-                };
-
-                if writer.write_all(&write_buf[0..len]).await.is_err() {
-                    error!("MQTT: Failed to send packet");
-                    break;
-                }
-            }
-        };
+        let recv_loop = recv_loop(reader, &mut read_buf);
+        let send_loop = send_loop(client_id, writer, &mut write_buf);
 
         let ping_loop = async {
             loop {
@@ -245,32 +264,15 @@ async fn mqtt_task(mut control: Control<'static>, stack: Stack<'static>) {
             }
         };
 
-        let recv_loop = async {
-            loop {
-                let packet = match read_packet(&mut reader, &mut read_buf).await {
-                    Ok(p) => p,
-                    Err(_) => {
-                        error!("MQTT: Failed to receive packet");
-                        break;
-                    }
-                };
-
-                match packet {
-                    Packet::Pingresp => {}
-                    p => {
-                        warn!("MQTT: Unexpected packet: {:?}", p.get_type());
-                    }
-                }
-            }
-        };
-
         select3(send_loop, ping_loop, recv_loop).await;
+
+        socket.close();
     }
 }
 
 pub async fn spawn_mqtt(spawner: &Spawner, peripherals: NetPeripherals) {
-    let fw = include_bytes!("../cyw43/43439A0.bin");
-    let clm = include_bytes!("../cyw43/43439A0_clm.bin");
+    let fw = include_bytes!("../../cyw43/43439A0.bin");
+    let clm = include_bytes!("../../cyw43/43439A0_clm.bin");
 
     let pwr = Output::new(peripherals.pwr, Level::Low);
     let cs = Output::new(peripherals.cs, Level::High);

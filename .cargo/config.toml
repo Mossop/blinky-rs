@@ -19,6 +19,9 @@ rustflags = [
 [build]
 target = "thumbv6m-none-eabi"
 
+[env]
+DEFMT_LOG = "trace"
+
 [profile.release]
 lto = true
 opt-level = "s"
