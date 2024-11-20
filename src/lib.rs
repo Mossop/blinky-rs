@@ -24,21 +24,15 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
 use static_cell::StaticCell;
 
 use crate::{
-    leds::{Leds, RGB},
+    leds::{spawn_leds, LedProgram, LED_CHANNEL},
     mqtt::{spawn_mqtt, DeviceState, MqttMessage, MQTT_CHANNEL},
 };
 
 const FLASH_SIZE: usize = 2 * 1024 * 1024;
 
-#[derive(Clone, Copy)]
-enum LedState {
-    On { red: u8, green: u8, blue: u8 },
-    Off,
-}
-
 enum Command {
     MqttConnected,
-    SetLedState(LedState),
+    SetLedState(LedProgram),
 }
 
 static COMMAND_CHANNEL: channel::Channel<CriticalSectionRawMutex, Command, 10> =
@@ -93,10 +87,10 @@ pub async fn main(spawner: Spawner) {
     )
     .await;
 
+    spawn_leds(&spawner, resources.leds);
+
     let receiver = COMMAND_CHANNEL.receiver();
-    let mut led_state = LedState::Off;
-    let mut leds = Leds::<50, RGB>::new(resources.leds);
-    leds.set_state(led_state).await;
+    let mut led_program = LedProgram::Off;
 
     loop {
         let command = receiver.receive().await;
@@ -107,14 +101,14 @@ pub async fn main(spawner: Spawner) {
                     .send(MqttMessage::SendState(DeviceState::Online))
                     .await;
                 MQTT_CHANNEL
-                    .send(MqttMessage::SendState(DeviceState::Led(led_state)))
+                    .send(MqttMessage::SendState(DeviceState::Led(led_program)))
                     .await;
             }
             Command::SetLedState(state) => {
-                led_state = state;
-                leds.set_state(state).await;
+                led_program = state;
+                LED_CHANNEL.send(led_program).await;
                 MQTT_CHANNEL
-                    .send(MqttMessage::SendState(DeviceState::Led(led_state)))
+                    .send(MqttMessage::SendState(DeviceState::Led(led_program)))
                     .await;
             }
         }

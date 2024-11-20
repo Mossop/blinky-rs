@@ -1,9 +1,9 @@
 use core::fmt::Write;
 
 use crate::{
+    leds::LedProgram,
     log::{debug, warn},
     mqtt::{DeviceState, Topic},
-    LedState,
 };
 use mqttrust::{
     encoding::v4::{encode_slice, Connect, Error, LastWill, Protocol},
@@ -15,7 +15,7 @@ use crate::buffer::ByteBuffer;
 
 const DEVICE: &str = "Blinky";
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum State {
     On,
@@ -29,11 +29,19 @@ pub enum ColorMode {
     Rgb,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct LedColor {
     r: u8,
     g: u8,
     b: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Effect {
+    #[default]
+    #[serde(rename = "EFFECT_OFF")]
+    None,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -45,41 +53,44 @@ pub struct LedPayload {
     color_mode: Option<ColorMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     color: Option<LedColor>,
+    #[serde(default)]
+    effect: Effect,
 }
 
 impl LedPayload {
-    fn from_state(state: &LedState) -> Self {
+    fn from_program(state: LedProgram) -> Self {
         match state {
-            LedState::Off => LedPayload::default(),
-            LedState::On { red, green, blue } => LedPayload {
+            LedProgram::Off => LedPayload::default(),
+            LedProgram::Solid { red, green, blue } => LedPayload {
                 state: State::On,
                 brightness: None,
                 color_mode: Some(ColorMode::Rgb),
                 color: Some(LedColor {
-                    r: *red,
-                    g: *green,
-                    b: *blue,
+                    r: red,
+                    g: green,
+                    b: blue,
                 }),
+                effect: Effect::None,
             },
         }
     }
 
-    pub fn to_state(&self) -> LedState {
-        match (&self.state, &self.brightness, &self.color) {
-            (State::On, _, Some(LedColor { r, g, b })) => LedState::On {
-                red: *r,
-                green: *g,
-                blue: *b,
+    pub fn to_state(&self) -> LedProgram {
+        match (self.state, self.brightness, self.color) {
+            (State::On, _, Some(LedColor { r, g, b })) => LedProgram::Solid {
+                red: r,
+                green: g,
+                blue: b,
             },
-            (State::On, Some(br), None) => LedState::On {
-                red: *br,
-                green: *br,
-                blue: *br,
+            (State::On, Some(br), None) => LedProgram::Solid {
+                red: br,
+                green: br,
+                blue: br,
             },
-            (State::Off, _, _) => LedState::Off,
+            (State::Off, _, _) => LedProgram::Off,
             _ => {
                 warn!("Unknown led state");
-                LedState::Off
+                LedProgram::Off
             }
         }
     }
@@ -158,8 +169,7 @@ pub(super) fn discovery<'a>(
         r#"{{
   "device": {{
     "identifiers": [
-      "{client_id}",
-      "{mac_addr}"
+      "{client_id}"
     ],
     "connections": [["mac", "{}:{}:{}:{}:{}:{}"]],
     "name": "{DEVICE} {client_id}"
@@ -177,6 +187,7 @@ pub(super) fn discovery<'a>(
       "state_topic": "blinky/{client_id}/leds/state",
       "command_topic": "blinky/{client_id}/leds/set",
       "supported_color_modes": ["rgb"],
+      "effect": true,
       "effect_list": ["rainbow"]
     }}
   }}
@@ -216,10 +227,12 @@ pub(super) fn state<'a>(
             write!(&mut topic, "blinky/{client_id}/status").unwrap();
             write!(&mut payload, "online").unwrap();
         }
-        DeviceState::Led(state) => {
+        DeviceState::Led(program) => {
             write!(&mut topic, "blinky/{client_id}/leds/state").unwrap();
 
-            payload.serialize(&LedPayload::from_state(state)).unwrap();
+            payload
+                .serialize(&LedPayload::from_program(*program))
+                .unwrap();
         }
     }
 

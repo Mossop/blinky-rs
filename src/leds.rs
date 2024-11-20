@@ -1,9 +1,40 @@
 use core::marker::PhantomData;
 
+use embassy_executor::Spawner;
+use embassy_futures::select::{select, Either};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
+use embassy_time::{Duration, Ticker};
 use smart_leds::RGB8;
 
+use crate::ws2812::PioWs2812;
 use crate::LedPeripherals;
-use crate::{ws2812::PioWs2812, LedState};
+
+pub static LED_CHANNEL: channel::Channel<CriticalSectionRawMutex, LedProgram, 1> =
+    channel::Channel::new();
+
+#[derive(Clone, Copy)]
+pub enum LedProgram {
+    Off,
+    Solid { red: u8, green: u8, blue: u8 },
+}
+
+struct AbortableTicker {
+    ticker: Ticker,
+}
+
+impl AbortableTicker {
+    fn every(duration: Duration) -> Self {
+        Self {
+            ticker: Ticker::every(duration),
+        }
+    }
+
+    async fn next(&mut self) -> bool {
+        let result = select(self.ticker.next(), LED_CHANNEL.ready_to_receive()).await;
+
+        matches!(result, Either::Second(_))
+    }
+}
 
 const GAMMA8: [u8; 256] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
@@ -19,35 +50,29 @@ const GAMMA8: [u8; 256] = [
     223, 225, 228, 231, 233, 236, 239, 241, 244, 247, 249, 252, 255,
 ];
 
-pub fn gamma_corrected(pixel: &RGB8) -> RGB8 {
-    RGB8::new(
-        GAMMA8[pixel.r as usize],
-        GAMMA8[pixel.g as usize],
-        GAMMA8[pixel.b as usize],
-    )
-}
-
 pub trait Order {
-    fn ordered(pixel: &RGB8) -> (&u8, &u8, &u8);
+    fn ordered(pixel: &RGB8) -> (u8, u8, u8);
     fn to_word(pixel: &RGB8) -> u32 {
         let (a, b, c) = Self::ordered(pixel);
-        (u32::from(*a) << 24) | (u32::from(*b) << 16) | (u32::from(*c) << 8)
+        (u32::from(GAMMA8[a as usize]) << 24)
+            | (u32::from(GAMMA8[b as usize]) << 16)
+            | (u32::from(GAMMA8[c as usize]) << 8)
     }
 }
 
 #[allow(clippy::upper_case_acronyms)]
 pub struct GRB;
 impl Order for GRB {
-    fn ordered(pixel: &RGB8) -> (&u8, &u8, &u8) {
-        (&pixel.g, &pixel.r, &pixel.b)
+    fn ordered(pixel: &RGB8) -> (u8, u8, u8) {
+        (pixel.g, pixel.r, pixel.b)
     }
 }
 
 #[allow(clippy::upper_case_acronyms)]
 pub struct RGB;
 impl Order for RGB {
-    fn ordered(pixel: &RGB8) -> (&u8, &u8, &u8) {
-        (&pixel.r, &pixel.g, &pixel.b)
+    fn ordered(pixel: &RGB8) -> (u8, u8, u8) {
+        (pixel.r, pixel.g, pixel.b)
     }
 }
 
@@ -70,36 +95,44 @@ impl<const N: usize, O: Order> Leds<N, O> {
         }
     }
 
-    pub fn len(&self) -> usize {
-        N
-    }
-
-    pub fn get(&self, index: usize) -> &RGB8 {
-        &self.pixels[index]
-    }
-
-    pub fn set(&mut self, index: usize, pixel: &RGB8) {
-        self.pixels[index] = *pixel;
-
-        self.data[index] = O::to_word(&gamma_corrected(pixel));
+    pub fn set_all(&mut self, pixel: &RGB8) {
+        let word = O::to_word(pixel);
+        for index in 0..N {
+            self.pixels[index] = *pixel;
+            self.data[index] = word;
+        }
     }
 
     pub async fn write(&mut self) {
         self.ws2812.write(self.data).await;
     }
+}
 
-    pub async fn set_state(&mut self, state: LedState) {
-        let pixel = match state {
-            LedState::Off => RGB8::new(0, 0, 0),
-            LedState::On { red, green, blue } => RGB8::new(red, green, blue),
-        };
-
-        let word = O::to_word(&gamma_corrected(&pixel));
-        for index in 0..N {
-            self.pixels[index] = pixel;
-            self.data[index] = word;
+impl LedProgram {
+    async fn run<const N: usize, O: Order>(&self, leds: &mut Leds<N, O>) {
+        match self {
+            Self::Off => {
+                leds.set_all(&RGB8::new(0, 0, 0));
+                leds.write().await;
+            }
+            Self::Solid { red, green, blue } => {
+                leds.set_all(&RGB8::new(*red, *green, *blue));
+                leds.write().await;
+            }
         }
-
-        self.write().await;
     }
+}
+
+#[embassy_executor::task]
+async fn led_task(peripherals: LedPeripherals) {
+    let mut leds = Leds::<50, RGB>::new(peripherals);
+
+    loop {
+        let program = LED_CHANNEL.receive().await;
+        program.run(&mut leds).await;
+    }
+}
+
+pub fn spawn_leds(spawner: &Spawner, peripherals: LedPeripherals) {
+    spawner.spawn(led_task(peripherals)).unwrap();
 }

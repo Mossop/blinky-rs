@@ -1,9 +1,9 @@
 use core::str;
 
 use crate::{
+    leds::LedProgram,
     log::{error, trace, warn},
     mqtt::packets::{packet_size, state, subscribe, LedPayload},
-    LedState,
 };
 use cyw43::{Control, JoinOptions};
 use cyw43_pio::PioSpi;
@@ -69,7 +69,7 @@ impl Topic {
 
 pub enum DeviceState {
     Online,
-    Led(LedState),
+    Led(LedProgram),
 }
 
 pub(crate) enum MqttMessage {
