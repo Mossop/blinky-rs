@@ -47,19 +47,13 @@ impl Order for OrderRGB {
     }
 }
 
-pub fn into_data<const N: usize, O: Order, P: Pixel>(pixels: &[P; N], data: &mut [u32; N]) {
-    for i in 0..N {
-        data[i] = pixels[i].to_word::<O>();
-    }
-}
-
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Default)]
 // All components range 0..=255
 pub struct RGB {
-    r: u8,
-    g: u8,
-    b: u8,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
 }
 
 impl Pixel for RGB {
@@ -72,7 +66,7 @@ impl Pixel for RGB {
     }
 }
 
-type Float = f32;
+pub type Float = f32;
 const ONE_THIRD: Float = 1.0 / 3.0;
 const TWO_THIRD: Float = 2.0 * ONE_THIRD;
 const ONE_SIXTH: Float = 1.0 / 6.0;
@@ -81,9 +75,9 @@ const ONE_SIXTH: Float = 1.0 / 6.0;
 #[derive(Clone, Copy, Default)]
 // All components range 0..=1.0
 pub struct HSL {
-    h: Float,
-    s: Float,
-    l: Float,
+    pub h: Float,
+    pub s: Float,
+    pub l: Float,
 }
 
 impl Pixel for HSL {
@@ -171,9 +165,9 @@ impl Pixel for HSL {
 #[derive(Clone, Copy, Default)]
 // All components range 0..=1.0
 pub struct HSV {
-    h: Float,
-    s: Float,
-    v: Float,
+    pub h: Float,
+    pub s: Float,
+    pub v: Float,
 }
 
 impl Pixel for HSV {

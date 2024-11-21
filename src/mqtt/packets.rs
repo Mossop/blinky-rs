@@ -42,6 +42,7 @@ pub enum Effect {
     #[default]
     #[serde(rename = "EFFECT_OFF")]
     None,
+    Flames,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -71,6 +72,13 @@ impl LedPayload {
                     b: blue,
                 }),
                 effect: Effect::None,
+            },
+            LedProgram::Flames => LedPayload {
+                state: State::On,
+                brightness: None,
+                color_mode: None,
+                color: None,
+                effect: Effect::Flames,
             },
         }
     }
@@ -188,7 +196,7 @@ pub(super) fn discovery<'a>(
       "command_topic": "blinky/{client_id}/leds/set",
       "supported_color_modes": ["rgb"],
       "effect": true,
-      "effect_list": ["rainbow"]
+      "effect_list": ["flames"]
     }}
   }}
 }}"#,

@@ -111,9 +111,9 @@ impl PioWs2812 {
         }
     }
 
-    pub async fn write<const N: usize>(&mut self, data: [u32; N]) {
+    pub async fn write<const N: usize>(&mut self, data: &[u32; N]) {
         // DMA transfer
-        self.sm.tx().dma_push(self.dma.reborrow(), &data).await;
+        self.sm.tx().dma_push(self.dma.reborrow(), data).await;
 
         Timer::after_micros(55).await;
     }

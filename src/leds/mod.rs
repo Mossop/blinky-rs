@@ -3,6 +3,7 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
 use embassy_time::{Duration, Ticker};
 
+mod animations;
 mod color;
 mod ws2812;
 
@@ -19,6 +20,7 @@ pub static LED_CHANNEL: channel::Channel<CriticalSectionRawMutex, LedProgram, 1>
 pub enum LedProgram {
     Off,
     Solid { red: u8, green: u8, blue: u8 },
+    Flames,
 }
 
 struct AbortableTicker {
@@ -41,13 +43,18 @@ impl AbortableTicker {
 
 impl LedProgram {
     async fn run<const N: usize, O: Order>(&self, ws2812: &mut PioWs2812) {
+        let ticker = AbortableTicker::every(Duration::from_millis(5));
+
         match self {
             Self::Off => {
-                ws2812.write([0_u32; N]).await;
+                ws2812.write(&[0_u32; N]).await;
             }
             Self::Solid { red, green, blue } => {
                 let word = RGB::from_rgb((*red, *green, *blue)).to_word::<O>();
-                ws2812.write([word; N]).await;
+                ws2812.write(&[word; N]).await;
+            }
+            Self::Flames => {
+                animations::flames::<N, O>(ticker, ws2812).await;
             }
         }
     }

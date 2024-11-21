@@ -89,7 +89,8 @@ pub async fn main(spawner: Spawner) {
     spawn_leds(&spawner, resources.leds);
 
     let receiver = COMMAND_CHANNEL.receiver();
-    let mut led_program = LedProgram::Off;
+    let mut led_program = LedProgram::Flames;
+    LED_CHANNEL.send(led_program).await;
 
     loop {
         let command = receiver.receive().await;
