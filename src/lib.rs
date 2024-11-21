@@ -15,7 +15,6 @@ mod log;
 mod mqtt;
 #[cfg(feature = "log")]
 mod usb;
-mod ws2812;
 
 #[cfg(feature = "defmt")]
 use defmt_rtt as _;

@@ -111,7 +111,6 @@ impl PioWs2812 {
         }
     }
 
-    /// Write a buffer of [smart_leds::RGB8] to the ws2812 string
     pub async fn write<const N: usize>(&mut self, data: [u32; N]) {
         // DMA transfer
         self.sm.tx().dma_push(self.dma.reborrow(), &data).await;

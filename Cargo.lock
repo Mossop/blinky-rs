@@ -138,13 +138,13 @@ dependencies = [
  "hex",
  "log",
  "mqttrust",
+ "num-traits",
  "panic-probe",
  "pio",
  "portable-atomic",
  "rand",
  "serde",
  "serde-json-core",
- "smart-leds",
  "static_cell",
 ]
 
