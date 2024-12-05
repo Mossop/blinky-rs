@@ -3,7 +3,12 @@
 use embassy_time::Timer;
 use fixed::types::U24F8;
 
-use embassy_rp::{bind_interrupts, clocks::clk_sys_freq, pio::Pio};
+use embassy_rp::{
+    bind_interrupts,
+    clocks::clk_sys_freq,
+    peripherals::{DMA_CH1, PIN_15},
+    pio::Pio,
+};
 use embassy_rp::{dma::AnyChannel, pio::InterruptHandler};
 use embassy_rp::{
     peripherals::PIO1,
@@ -13,8 +18,6 @@ use embassy_rp::{
     },
 };
 use embassy_rp::{Peripheral, PeripheralRef};
-
-use crate::LedPeripherals;
 
 bind_interrupts!(struct Irqs {
     PIO1_IRQ_0 => InterruptHandler<PIO1>;
@@ -60,28 +63,27 @@ impl<'a, PIO: Instance> PioWs2812Program<'a, PIO> {
 }
 
 /// Pio backed ws2812 driver
-/// Const N is the number of ws2812 leds attached to this pin
-pub struct PioWs2812 {
+pub struct Ws2812 {
     dma: PeripheralRef<'static, AnyChannel>,
     sm: StateMachine<'static, PIO1, 0>,
 }
 
-impl PioWs2812 {
+impl Ws2812 {
     /// Configure a pio state machine to use the loaded ws2812 program.
-    pub fn new(peripherals: LedPeripherals) -> Self {
+    pub fn new(pio: PIO1, dma: DMA_CH1, pin: PIN_15) -> Self {
         let Pio {
             mut common,
             mut sm0,
             ..
-        } = Pio::new(peripherals.pio, Irqs);
+        } = Pio::new(pio, Irqs);
 
-        let dma = peripherals.dma.into_ref();
+        let dma = dma.into_ref();
 
         // Setup sm0
         let mut cfg = Config::default();
 
         // Pin config
-        let out_pin = common.make_pio_pin(peripherals.pin);
+        let out_pin = common.make_pio_pin(pin);
         cfg.set_out_pins(&[&out_pin]);
         cfg.set_set_pins(&[&out_pin]);
 

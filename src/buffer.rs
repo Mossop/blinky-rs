@@ -15,6 +15,11 @@ impl<const N: usize> ByteBuffer<N> {
         }
     }
 
+    pub fn write(&mut self, buf: &[u8]) {
+        self.buf[self.cursor..self.cursor + buf.len()].copy_from_slice(buf);
+        self.cursor += buf.len();
+    }
+
     pub fn buffer(&self) -> &[u8] {
         &self.buf[0..self.cursor]
     }

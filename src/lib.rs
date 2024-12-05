@@ -1,115 +1,141 @@
 #![no_std]
 
-use core::str;
-
-use assign_resources::assign_resources;
 use embassy_executor::Spawner;
-use embassy_rp::{
-    flash::{Async, Flash},
-    peripherals,
-};
 
-mod buffer;
+#[cfg_attr(feature = "rp2040", path = "board/rp2040.rs")]
+#[cfg_attr(feature = "rp2350", path = "board/rp2350.rs")]
+mod board;
 mod leds;
-mod log;
-mod mqtt;
 #[cfg(feature = "log")]
 mod usb;
 
 #[cfg(feature = "defmt")]
 use defmt_rtt as _;
-
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
-use static_cell::StaticCell;
-
-use crate::{
-    leds::{spawn_leds, LedProgram, LED_CHANNEL},
-    mqtt::{spawn_mqtt, DeviceState, MqttMessage, MQTT_CHANNEL},
+use log::warn;
+use mcutie::{
+    homeassistant::{
+        binary_sensor::BinarySensorState,
+        light::{Color, Light, LightState, SupportedColorMode},
+        AvailabilityState, AvailabilityTopics, Device, Entity, Origin,
+    },
+    McutieBuilder, McutieTask, MqttMessage, PublishBytes, Publishable, Topic,
 };
 
-const FLASH_SIZE: usize = 2 * 1024 * 1024;
+use crate::{
+    board::Board,
+    leds::{spawn_leds, LedProgram, LED_CHANNEL},
+};
 
-enum Command {
-    MqttConnected,
-    SetLedState(LedProgram),
-}
+const DEVICE_AVAILABILITY_TOPIC: Topic<&'static str> = Topic::Device("status");
+const LED_STATE_TOPIC: Topic<&'static str> = Topic::Device("leds/state");
+const LED_COMMAND_TOPIC: Topic<&'static str> = Topic::Device("leds/set");
 
-static COMMAND_CHANNEL: channel::Channel<CriticalSectionRawMutex, Command, 10> =
-    channel::Channel::new();
+const DEVICE: Device<'static> = Device::new();
+const ORIGIN: Origin<'static> = Origin::new();
 
-assign_resources! {
-    usb: UsbPeripherals {
-        usb: USB,
+const LED_ENTITY: Entity<'static, 1, Light<'static, 1, 0>> = Entity {
+    device: DEVICE,
+    origin: ORIGIN,
+    object_id: "leds",
+    unique_id: Some("leds"),
+    name: "Leds",
+    availability: AvailabilityTopics::All([DEVICE_AVAILABILITY_TOPIC]),
+    state_topic: LED_STATE_TOPIC,
+    component: Light {
+        command_topic: LED_COMMAND_TOPIC,
+        supported_color_modes: [SupportedColorMode::Rgb],
+        effects: [],
     },
-    network: NetPeripherals {
-        pwr: PIN_23,
-        cs: PIN_25,
-        pio: PIO0,
-        dio: PIN_24,
-        clk: PIN_29,
-        dma: DMA_CH0,
-    }
-    leds: LedPeripherals {
-        pio: PIO1,
-        dma: DMA_CH1,
-        pin: PIN_15,
-    }
-    flash: FlashPeripherals {
-        flash: FLASH,
-        dma: DMA_CH2,
-    }
+};
+
+#[embassy_executor::task]
+async fn mqtt_task(
+    runner: McutieTask<
+        'static,
+        &'static str,
+        PublishBytes<'static, &'static str, AvailabilityState>,
+        1,
+    >,
+) {
+    runner.run().await;
 }
 
 pub async fn main(spawner: Spawner) {
-    let peripherals = embassy_rp::init(Default::default());
+    let (board, ws2812) = Board::init(&spawner, env!("BLINKY_SSID"), env!("BLINKY_PASSWORD")).await;
 
-    let resources = split_resources!(peripherals);
+    let (receiver, mqtt_runner) =
+        McutieBuilder::new(board.network, "blinky", env!("BLINKY_BROKER"))
+            .with_device_id(board.board_id)
+            .with_last_will(DEVICE_AVAILABILITY_TOPIC.with_bytes(AvailabilityState::Offline))
+            .with_subscriptions([LED_COMMAND_TOPIC])
+            .build();
 
-    #[cfg(feature = "log")]
-    usb::spawn_usb(&spawner, resources.usb);
+    spawner.spawn(mqtt_task(mqtt_runner)).unwrap();
 
-    let mut flash = Flash::<_, Async, FLASH_SIZE>::new(resources.flash.flash, resources.flash.dma);
+    spawn_leds(&spawner, ws2812);
 
-    static BOARD_ID: StaticCell<[u8; 16]> = StaticCell::new();
-    let board_id = BOARD_ID.init_with(|| {
-        let mut uid = [0; 8];
-        flash.blocking_unique_id(&mut uid).unwrap();
-        let mut hex_slice = [0; 16];
-        hex::encode_to_slice(uid, &mut hex_slice).unwrap();
-        hex_slice
-    });
-
-    spawn_mqtt(
-        &spawner,
-        str::from_utf8(board_id).unwrap(),
-        resources.network,
-    )
-    .await;
-
-    spawn_leds(&spawner, resources.leds);
-
-    let receiver = COMMAND_CHANNEL.receiver();
-    let mut led_program = LedProgram::Flames;
-    LED_CHANNEL.send(led_program).await;
+    let mut last_program: LedProgram = LedProgram::Solid {
+        red: 255,
+        green: 255,
+        blue: 255,
+    };
+    LED_CHANNEL.send(LedProgram::Off).await;
 
     loop {
-        let command = receiver.receive().await;
+        let message = receiver.receive().await;
 
-        match command {
-            Command::MqttConnected => {
-                MQTT_CHANNEL
-                    .send(MqttMessage::SendState(DeviceState::Online))
+        match message {
+            MqttMessage::Connected | MqttMessage::HomeAssistantOnline => {
+                board.led.set(true).await;
+
+                let _ = DEVICE_AVAILABILITY_TOPIC
+                    .with_bytes(AvailabilityState::Online)
+                    .publish()
                     .await;
-                MQTT_CHANNEL
-                    .send(MqttMessage::SendState(DeviceState::Led(led_program)))
-                    .await;
+
+                let _ = LED_ENTITY.publish_discovery().await;
             }
-            Command::SetLedState(state) => {
-                led_program = state;
-                LED_CHANNEL.send(led_program).await;
-                MQTT_CHANNEL
-                    .send(MqttMessage::SendState(DeviceState::Led(led_program)))
-                    .await;
+            MqttMessage::Disconnected => {
+                board.led.set(false).await;
+            }
+            MqttMessage::Publish(topic, buffer) => {
+                if topic == LED_COMMAND_TOPIC {
+                    let new_program = match LightState::from_payload(&buffer) {
+                        Ok(light_state) => {
+                            if light_state.state == BinarySensorState::Off {
+                                LedProgram::Off
+                            } else if let Some(effect) = light_state.effect {
+                                match effect {
+                                    "Flames" => LedProgram::Flames,
+                                    e => {
+                                        warn!("Unexpected effect {e}");
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                match light_state.color {
+                                    Color::None => last_program,
+                                    Color::Rgb { red, green, blue } => {
+                                        LedProgram::Solid { red, green, blue }
+                                    }
+                                    _ => {
+                                        warn!("Unexpected color state received.");
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            warn!("Failed to decode state");
+                            continue;
+                        }
+                    };
+
+                    LED_CHANNEL.send(new_program).await;
+                    if !matches!(new_program, LedProgram::Off) {
+                        last_program = new_program;
+                    }
+                }
             }
         }
     }

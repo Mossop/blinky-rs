@@ -1,13 +1,15 @@
 use embassy_rp::clocks::RoscRng;
 use rand::{distributions::Uniform, prelude::Distribution, Rng};
 
-use crate::leds::{
-    color::{Float, Order, Pixel, HSV},
-    ws2812::PioWs2812,
-    AbortableTicker,
+use crate::{
+    board::Ws2812,
+    leds::{
+        color::{Float, Order, Pixel, HSV},
+        AbortableTicker,
+    },
 };
 
-pub async fn flames<const N: usize, O: Order>(mut ticker: AbortableTicker, ws2812: &mut PioWs2812) {
+pub async fn flames<const N: usize, O: Order>(mut ticker: AbortableTicker, ws2812: &mut Ws2812) {
     let mut pixels = [0_u32; N];
     let min_hue: Float = 0.0;
     let max_hue: Float = 50.0 / 360.0;

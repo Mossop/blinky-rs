@@ -5,13 +5,12 @@ use embassy_executor::Spawner;
 use embassy_rp::{
     bind_interrupts,
     peripherals::USB,
-    rom_data::reset_to_usb_boot,
     usb::{Driver, InterruptHandler},
 };
 use embassy_usb_logger::{ReceiverHandler, UsbLogger, Writer};
 use log::{LevelFilter, Record};
 
-use crate::UsbPeripherals;
+use crate::board::Board;
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -27,7 +26,7 @@ impl ReceiverHandler for Handler {
             // If you are using elf2uf2-term with the '-t' flag, then when closing the serial monitor,
             // this will automatically put the pico into boot mode
             if data == "q" || data == "elf2uf2-term" {
-                reset_to_usb_boot(0, 0); // Restart the chip
+                Board::reboot_to_bootsel();
             } else if data.eq_ignore_ascii_case("hello") {
                 log::info!("World!");
             } else {
@@ -60,16 +59,18 @@ fn writer(record: &Record, writer: &mut Writer<'_, 1024>) {
 async fn usb_task(driver: Driver<'static, USB>, level: LevelFilter) {
     static mut LOGGER: UsbLogger<1024, Handler> = UsbLogger::with_custom_style(writer);
     unsafe {
+        #[allow(static_mut_refs)]
         LOGGER.with_handler(Handler::new());
         #[allow(static_mut_refs)]
         let _ = ::log::set_logger_racy(&LOGGER).map(|()| log::set_max_level_racy(level));
+        #[allow(static_mut_refs)]
         let _ = LOGGER
             .run(&mut ::embassy_usb_logger::LoggerState::new(), driver)
             .await;
     }
 }
 
-pub fn spawn_usb(spawner: &Spawner, peripherals: UsbPeripherals) {
-    let driver = Driver::new(peripherals.usb, Irqs);
+pub fn spawn_usb(spawner: &Spawner, usb: USB) {
+    let driver = Driver::new(usb, Irqs);
     spawner.spawn(usb_task(driver, LevelFilter::Trace)).unwrap();
 }

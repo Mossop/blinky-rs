@@ -4,9 +4,26 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["log"]
-log = ["dep:log", "dep:embassy-usb-logger"]
-defmt = ["dep:defmt", "dep:defmt-rtt", "panic-probe/print-defmt"]
+default = ["log", "rp2040"]
+rp2350 = ["embassy-rp/rp235xa"]
+rp2040 = ["embassy-rp/rp2040"]
+log = ["dep:log", "dep:embassy-usb-logger", "mcutie/log"]
+defmt = [
+  "dep:defmt",
+  "dep:defmt-rtt",
+  "panic-probe/print-defmt",
+  "embassy-rp/defmt",
+  "embassy-executor/defmt",
+  "embassy-sync/defmt",
+  "embassy-time/defmt",
+  "embassy-net/defmt",
+  "embassy-usb/defmt",
+  "embassy-futures/defmt",
+  "cyw43/defmt",
+  "cyw43-pio/defmt",
+  "panic-probe/print-defmt",
+  "embedded-io-async/defmt-03",
+]
 
 [dependencies]
 embassy-executor = { version = "0.6.3", features = [
@@ -20,13 +37,9 @@ embassy-rp = { version = "0.2.0", features = [
   "unstable-pac",
   "time-driver",
   "critical-section-impl",
-  "rp2040",
-  "rom-func-cache",
-  "intrinsics",
-  "rom-v2-intrinsics",
 ] }
 embassy-time = "0.3.2"
-embassy-net = { version = "0.4.0", features = [
+embassy-net = { version = "0.5.0", features = [
   "dhcpv4",
   "tcp",
   "dns",
@@ -57,16 +70,18 @@ log = { version = "0.4.22", optional = true }
 serde = { version = "1.0.215", default-features = false, features = ["derive"] }
 serde-json-core = "0.6.0"
 num-traits = { version = "0.2.19", default-features = false }
+mcutie = "0.1.0"
 
 [patch.crates-io]
-embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-embassy-net = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-cyw43 = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
-cyw43-pio = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-executor-v0.6.3" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+embassy-net = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+cyw43 = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+cyw43-pio = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
+mcutie = { path = "../mcutie" }
