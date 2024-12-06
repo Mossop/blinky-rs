@@ -1,3 +1,6 @@
+[alias]
+rp2040 = "run --release --target=thumbv6m-none-eabi"
+
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 runner = "elf2uf2-rs -d -s -t"
 # runner = "picotool load -u -v -x -t elf"
@@ -16,9 +19,6 @@ rustflags = [
   "-C",
   "no-vectorize-loops",
 ]
-
-[build]
-target = "thumbv6m-none-eabi"
 
 [env]
 DEFMT_LOG = "trace"

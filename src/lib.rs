@@ -42,7 +42,7 @@ const LED_ENTITY: Entity<'static, 1, Light<'static, 1, 0>> = Entity {
     availability: AvailabilityTopics::All([DEVICE_AVAILABILITY_TOPIC]),
     state_topic: LED_STATE_TOPIC,
     component: Light {
-        command_topic: LED_COMMAND_TOPIC,
+        command_topic: Some(LED_COMMAND_TOPIC),
         supported_color_modes: [SupportedColorMode::Rgb],
         effects: [],
     },
@@ -115,6 +115,32 @@ pub async fn main(spawner: Spawner) {
                             } else {
                                 match light_state.color {
                                     Color::None => last_program,
+                                    Color::Brightness(b) => {
+                                        if let LedProgram::Solid { red, green, blue } = last_program
+                                        {
+                                            let reference = if red > green && red > blue {
+                                                red
+                                            } else if green > red && green > blue {
+                                                green
+                                            } else {
+                                                blue
+                                            };
+
+                                            let scale = b as f32 / reference as f32;
+
+                                            LedProgram::Solid {
+                                                red: (red as f32 * scale) as u8,
+                                                green: (green as f32 * scale) as u8,
+                                                blue: (blue as f32 * scale) as u8,
+                                            }
+                                        } else {
+                                            LedProgram::Solid {
+                                                red: b,
+                                                green: b,
+                                                blue: b,
+                                            }
+                                        }
+                                    }
                                     Color::Rgb { red, green, blue } => {
                                         LedProgram::Solid { red, green, blue }
                                     }

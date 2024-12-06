@@ -70,7 +70,7 @@ log = { version = "0.4.22", optional = true }
 serde = { version = "1.0.215", default-features = false, features = ["derive"] }
 serde-json-core = "0.6.0"
 num-traits = { version = "0.2.19", default-features = false }
-mcutie = "0.1.0"
+mcutie = "0.2.0"
 
 [patch.crates-io]
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
