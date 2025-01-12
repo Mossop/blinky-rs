@@ -67,7 +67,7 @@ hex = { version = "0.4.3", default-features = false }
 defmt = { version = "0.3.8", optional = true }
 defmt-rtt = { version = "0.4.1", optional = true }
 log = { version = "0.4.22", optional = true }
-serde = { version = "1.0.215", default-features = false, features = ["derive"] }
+serde = { version = "1.0.217", default-features = false, features = ["derive"] }
 serde-json-core = "0.6.0"
 num-traits = { version = "0.2.19", default-features = false }
 mcutie = "0.2.0"
@@ -84,4 +84,3 @@ embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", tag = "em
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
 cyw43 = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
 cyw43-pio = { git = "https://github.com/embassy-rs/embassy.git", tag = "embassy-net-v0.5.0" }
-mcutie = { path = "../mcutie" }

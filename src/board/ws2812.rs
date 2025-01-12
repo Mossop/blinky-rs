@@ -6,15 +6,11 @@ use fixed::types::U24F8;
 use embassy_rp::{
     bind_interrupts,
     clocks::clk_sys_freq,
-    peripherals::{DMA_CH1, PIN_15},
-    pio::Pio,
-};
-use embassy_rp::{dma::AnyChannel, pio::InterruptHandler};
-use embassy_rp::{
-    peripherals::PIO1,
+    dma::AnyChannel,
+    peripherals::{DMA_CH1, PIN_15, PIO1},
     pio::{
-        Common, Config, FifoJoin, Instance, LoadedProgram, ShiftConfig, ShiftDirection,
-        StateMachine,
+        Common, Config, FifoJoin, Instance, InterruptHandler, LoadedProgram, Pio, ShiftConfig,
+        ShiftDirection, StateMachine,
     },
 };
 use embassy_rp::{Peripheral, PeripheralRef};
